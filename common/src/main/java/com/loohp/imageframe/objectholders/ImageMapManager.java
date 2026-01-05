@@ -70,12 +70,18 @@ public class ImageMapManager implements AutoCloseable {
     private final List<ImageMapRenderEventListener> renderEventListeners;
     private final Set<Integer> deletedMapIds;
 
+    // Animation tick caching to avoid repeated System.currentTimeMillis() calls
+    private volatile long cachedAnimationTick;
+    private volatile long cachedAnimationTickTime;
+
     public ImageMapManager(ImageFrameStorage imageFrameStorage) {
         this.maps = new ConcurrentHashMap<>();
         this.mapsByView = new ConcurrentHashMap<>();
         this.imageFrameStorage = imageFrameStorage;
         this.renderEventListeners = new CopyOnWriteArrayList<>();
         this.deletedMapIds = ConcurrentHashMap.newKeySet();
+        this.cachedAnimationTick = 0;
+        this.cachedAnimationTickTime = 0;
     }
 
     public ImageFrameStorage getStorage() {
@@ -83,7 +89,13 @@ public class ImageMapManager implements AutoCloseable {
     }
 
     protected long getCurrentAnimationTick() {
-        return System.currentTimeMillis() / 50;
+        long currentTime = System.currentTimeMillis();
+        // Cache tick value for 25ms to reduce repeated currentTimeMillis calls within same tick
+        if (currentTime - cachedAnimationTickTime > 25) {
+            cachedAnimationTick = currentTime / 50;
+            cachedAnimationTickTime = currentTime;
+        }
+        return cachedAnimationTick;
     }
 
     @Override
