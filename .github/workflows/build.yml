@@ -27,9 +27,9 @@ jobs:
         id: maven-cache
         with:
           path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-1.21.8-v2-${{ hashFiles('**/pom.xml') }}
+          key: ${{ runner.os }}-maven-1.21.8-v4-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            ${{ runner.os }}-maven-1.21.8-v2-
+            ${{ runner.os }}-maven-1.21.8-v4-
 
       - name: Cache BuildTools
         uses: actions/cache@v4
@@ -54,7 +54,8 @@ jobs:
           fi
 
           VERSION="1.21.8"
-          if [ ! -f ~/.m2/repository/org/spigotmc/spigot/$VERSION-R0.1-SNAPSHOT/spigot-$VERSION-R0.1-SNAPSHOT.jar ]; then
+          # Check for spigot (produced by BuildTools --remapped)
+          if [ ! -f ~/.m2/repository/org/spigotmc/spigot/$VERSION-R0.1-SNAPSHOT/spigot-$VERSION-R0.1-SNAPSHOT-remapped-mojang.jar ]; then
             echo "Building Spigot $VERSION..."
             java -jar BuildTools.jar --rev $VERSION --remapped
           else
