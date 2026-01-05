@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
@@ -20,7 +21,54 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: maven
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        id: maven-cache
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-spigot-v3-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-spigot-v3-
+
+      - name: Cache BuildTools
+        uses: actions/cache@v4
+        with:
+          path: ~/buildtools
+          key: ${{ runner.os }}-buildtools-jar-v1
+
+      - name: Install git for BuildTools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git
+
+      - name: Run BuildTools for all Spigot versions
+        run: |
+          mkdir -p ~/buildtools
+          cd ~/buildtools
+
+          # Download BuildTools if not cached
+          if [ ! -f BuildTools.jar ]; then
+            echo "Downloading BuildTools..."
+            curl -o BuildTools.jar https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
+          fi
+
+          # All versions needed by the project
+          VERSIONS="1.16.1 1.16.2 1.16.4 1.17 1.18 1.18.2 1.19 1.19.3 1.19.4 1.20 1.20.2 1.20.3 1.20.5 1.20.6 1.21 1.21.1 1.21.2 1.21.3 1.21.4 1.21.5 1.21.6 1.21.7 1.21.8 1.21.9 1.21.10 1.21.11"
+
+          for VERSION in $VERSIONS; do
+            # Check if spigot jar exists in maven cache
+            if [ ! -f ~/.m2/repository/org/spigotmc/spigot/$VERSION-R0.1-SNAPSHOT/spigot-$VERSION-R0.1-SNAPSHOT.jar ]; then
+              echo "========================================="
+              echo "Building Spigot $VERSION..."
+              echo "========================================="
+              java -jar BuildTools.jar --rev $VERSION --remapped || {
+                echo "Failed to build $VERSION, continuing..."
+              }
+            else
+              echo "Spigot $VERSION already in cache, skipping..."
+            fi
+          done
 
       - name: Build with Maven
         run: mvn clean install -B -DskipTests
