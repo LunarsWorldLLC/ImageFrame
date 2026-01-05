@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -20,7 +21,45 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: maven
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        id: maven-cache
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-1.21.8-v2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-1.21.8-v2-
+
+      - name: Cache BuildTools
+        uses: actions/cache@v4
+        with:
+          path: ~/buildtools
+          key: ${{ runner.os }}-buildtools-jar-v1
+
+      - name: Install git for BuildTools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git
+
+      - name: Run BuildTools for Spigot 1.21.8
+        run: |
+          mkdir -p ~/buildtools
+          cd ~/buildtools
+
+          # Download BuildTools if not cached
+          if [ ! -f BuildTools.jar ]; then
+            echo "Downloading BuildTools..."
+            curl -o BuildTools.jar https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
+          fi
+
+          VERSION="1.21.8"
+          if [ ! -f ~/.m2/repository/org/spigotmc/spigot/$VERSION-R0.1-SNAPSHOT/spigot-$VERSION-R0.1-SNAPSHOT.jar ]; then
+            echo "Building Spigot $VERSION..."
+            java -jar BuildTools.jar --rev $VERSION --remapped
+          else
+            echo "Spigot $VERSION already in cache, skipping..."
+          fi
 
       - name: Build with Maven
         run: mvn clean install -B -DskipTests
