@@ -68,7 +68,7 @@ public enum MCVersion {
     V1_8("1.8", "1_8_R1", 0),
     UNSUPPORTED("Unsupported", null, -1);
 
-    public static final MCVersion MINIMUM_SUPPORTED_VERSION = V1_16;
+    public static final MCVersion MINIMUM_SUPPORTED_VERSION = V1_21_8;
 
     private static final MCVersion[] SUPPORTED_VALUES = Arrays.stream(values()).filter(v -> v.isSupported()).toArray(MCVersion[]::new);
 
