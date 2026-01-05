@@ -32,17 +32,28 @@ import java.util.Set;
 public class FloydSteinbergDithering {
 
     private static final C3[] PALETTE;
+    // Lookup table: RGB (packed as int) -> palette byte
+    private static final byte[] PALETTE_LUT = new byte[16777216];
+    // Lookup table: RGB (packed as int) -> palette C3 (r,g,b packed for fast error diffusion)
+    private static final int[] PALETTE_RGB_LUT = new int[16777216];
 
     static {
         Set<Byte> bytes = new LinkedHashSet<>();
         for (int i = 0; i < 16777216; i++) {
-            bytes.add(MapPalette.matchColor(new Color(i)));
+            byte paletteIdx = MapPalette.matchColor(new Color(i));
+            bytes.add(paletteIdx);
+            PALETTE_LUT[i] = paletteIdx;
         }
         Set<C3> values = new LinkedHashSet<>();
         for (byte b : bytes) {
             values.add(new C3(MapPalette.getColor(b)));
         }
         PALETTE = values.toArray(new C3[0]);
+        // Build RGB lookup for error diffusion
+        for (int i = 0; i < 16777216; i++) {
+            Color c = MapPalette.getColor(PALETTE_LUT[i]);
+            PALETTE_RGB_LUT[i] = (c.getRed() << 16) | (c.getGreen() << 8) | c.getBlue();
+        }
     }
 
     static class C3 {
@@ -109,35 +120,73 @@ public class FloydSteinbergDithering {
         int w = img.getWidth();
         int h = img.getHeight();
 
-        C3[][] d = new C3[h][w];
+        // Use primitive int arrays instead of C3 objects to reduce allocations
+        int[][] rr = new int[h][w];
+        int[][] gg = new int[h][w];
+        int[][] bb = new int[h][w];
+        boolean[][] transparent = new boolean[h][w];
 
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                d[y][x] = new C3(new Color(img.getRGB(x, y), true));
+                int argb = img.getRGB(x, y);
+                int alpha = (argb >> 24) & 0xFF;
+                transparent[y][x] = alpha < 128;
+                rr[y][x] = (argb >> 16) & 0xFF;
+                gg[y][x] = (argb >> 8) & 0xFF;
+                bb[y][x] = argb & 0xFF;
             }
         }
 
         byte[] result = new byte[w * h];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                C3 oldColor = d[y][x];
-                if (oldColor.isTransparent()) {
+                if (transparent[y][x]) {
                     result[y * w + x] = MapUtils.PALETTE_TRANSPARENT;
                 } else {
-                    C3 newColor = findClosestPaletteColor(oldColor);
-                    result[y * w + x] = MapPalette.matchColor(clampColor(newColor.r), clampColor(newColor.g), clampColor(newColor.b));
-                    C3 err = oldColor.sub(newColor);
+                    int oldR = rr[y][x];
+                    int oldG = gg[y][x];
+                    int oldB = bb[y][x];
+
+                    // Clamp to valid RGB range for lookup
+                    int clampedR = clampColor(oldR);
+                    int clampedG = clampColor(oldG);
+                    int clampedB = clampColor(oldB);
+                    int rgbKey = (clampedR << 16) | (clampedG << 8) | clampedB;
+
+                    // Direct LUT lookup instead of findClosestPaletteColor()
+                    result[y * w + x] = PALETTE_LUT[rgbKey];
+
+                    // Get the actual palette color for error diffusion
+                    int paletteRgb = PALETTE_RGB_LUT[rgbKey];
+                    int newR = (paletteRgb >> 16) & 0xFF;
+                    int newG = (paletteRgb >> 8) & 0xFF;
+                    int newB = paletteRgb & 0xFF;
+
+                    // Calculate error (inline, no object creation)
+                    int errR = oldR - newR;
+                    int errG = oldG - newG;
+                    int errB = oldB - newB;
+
+                    // Floyd-Steinberg error diffusion (inline arithmetic)
                     if (x + 1 < w) {
-                        d[y][x + 1] = d[y][x + 1].add(err.mul(7.0 / 16));
+                        rr[y][x + 1] += errR * 7 / 16;
+                        gg[y][x + 1] += errG * 7 / 16;
+                        bb[y][x + 1] += errB * 7 / 16;
                     }
                     if (x - 1 >= 0 && y + 1 < h) {
-                        d[y + 1][x - 1] = d[y + 1][x - 1].add(err.mul(3.0 / 16));
+                        rr[y + 1][x - 1] += errR * 3 / 16;
+                        gg[y + 1][x - 1] += errG * 3 / 16;
+                        bb[y + 1][x - 1] += errB * 3 / 16;
                     }
                     if (y + 1 < h) {
-                        d[y + 1][x] = d[y + 1][x].add(err.mul(5.0 / 16));
+                        rr[y + 1][x] += errR * 5 / 16;
+                        gg[y + 1][x] += errG * 5 / 16;
+                        bb[y + 1][x] += errB * 5 / 16;
                     }
                     if (x + 1 < w && y + 1 < h) {
-                        d[y + 1][x + 1] = d[y + 1][x + 1].add(err.mul(1.0 / 16));
+                        rr[y + 1][x + 1] += errR / 16;
+                        gg[y + 1][x + 1] += errG / 16;
+                        bb[y + 1][x + 1] += errB / 16;
                     }
                 }
             }

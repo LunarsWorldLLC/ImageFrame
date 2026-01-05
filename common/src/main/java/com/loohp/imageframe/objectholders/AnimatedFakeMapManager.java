@@ -94,7 +94,8 @@ public class AnimatedFakeMapManager implements Listener, Runnable {
 
     private Map<UUID, CompletableFuture<ItemFrameInfo>> collectItemFramesInfo(boolean async) {
         boolean isFolia = Scheduler.getPlatform() instanceof FoliaScheduler;
-        Map<UUID, CompletableFuture<ItemFrameInfo>> futures = new HashMap<>();
+        // Pre-allocate with known size to avoid resizing
+        Map<UUID, CompletableFuture<ItemFrameInfo>> futures = new HashMap<>(itemFrames.size());
         for (Map.Entry<UUID, TrackedItemFrameData> entry : itemFrames.entrySet()) {
             UUID uuid = entry.getKey();
             ItemFrame itemFrame = entry.getValue().getItemFrame();
@@ -133,7 +134,9 @@ public class AnimatedFakeMapManager implements Listener, Runnable {
 
     public void run() {
         Map<UUID, CompletableFuture<ItemFrameInfo>> entityTrackers = collectItemFramesInfo(!ImageFrame.handleAnimatedMapsOnMainThread);
-        Map<Player, List<FakeItemUtils.ItemFrameUpdateData>> updateData = new HashMap<>();
+        // Pre-allocate with expected capacity to reduce resizing
+        int onlinePlayerCount = Bukkit.getOnlinePlayers().size();
+        Map<Player, List<FakeItemUtils.ItemFrameUpdateData>> updateData = new HashMap<>(onlinePlayerCount);
         long deadline = System.currentTimeMillis() + 2000;
         for (Map.Entry<UUID, CompletableFuture<ItemFrameInfo>> entry : entityTrackers.entrySet()) {
             UUID uuid = entry.getKey();
@@ -236,7 +239,7 @@ public class AnimatedFakeMapManager implements Listener, Runnable {
             FakeItemUtils.ItemFrameUpdateData itemFrameUpdateData = new FakeItemUtils.ItemFrameUpdateData(entityId, getMapItem(mapId), mapView.getId(), mapView, currentPosition);
             players.forEach(p -> updateData.computeIfAbsent(p, k -> new ArrayList<>()).add(itemFrameUpdateData));
         }
-        Map<Player, List<Runnable>> sendingTasks = new HashMap<>();
+        Map<Player, List<Runnable>> sendingTasks = new HashMap<>(onlinePlayerCount);
         for (Map.Entry<Player, List<FakeItemUtils.ItemFrameUpdateData>> entry : updateData.entrySet()) {
             Player player = entry.getKey();
             if (ImageFrame.ifPlayerManager.getIFPlayer(player.getUniqueId()).getPreference(IFPlayerPreference.VIEW_ANIMATED_MAPS, BooleanState.class).getCalculatedValue(() -> ImageFrame.getPreferenceUnsetValue(player, IFPlayerPreference.VIEW_ANIMATED_MAPS).getRawValue(true))) {
