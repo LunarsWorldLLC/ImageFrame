@@ -50,7 +50,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 public class ImageMapManager implements AutoCloseable {
@@ -64,11 +67,14 @@ public class ImageMapManager implements AutoCloseable {
         return FAKE_MAP_ID_COUNTER.getAndUpdate(i -> i < FAKE_MAP_ID_START_RANGE ? FAKE_MAP_ID_START_RANGE : i + 1);
     }
 
+    private static final long SHUTDOWN_LOCK_TIMEOUT_SECONDS = 5;
+
     private final ImageFrameStorage imageFrameStorage;
     private final Map<Integer, ImageMap> maps;
     private final Map<MapView, ImageMap> mapsByView;
     private final List<ImageMapRenderEventListener> renderEventListeners;
     private final Set<Integer> deletedMapIds;
+    private final ReentrantLock managerLock;
 
     // Animation tick caching to avoid repeated System.currentTimeMillis() calls
     private volatile long cachedAnimationTick;
@@ -80,6 +86,7 @@ public class ImageMapManager implements AutoCloseable {
         this.imageFrameStorage = imageFrameStorage;
         this.renderEventListeners = new CopyOnWriteArrayList<>();
         this.deletedMapIds = ConcurrentHashMap.newKeySet();
+        this.managerLock = new ReentrantLock();
         this.cachedAnimationTick = 0;
         this.cachedAnimationTickTime = 0;
     }
@@ -100,7 +107,26 @@ public class ImageMapManager implements AutoCloseable {
 
     @Override
     public void close() {
-        saveDeletedMaps();
+        // Use tryLock with timeout to avoid blocking the main thread during shutdown
+        // The deletedMapIds set is thread-safe (ConcurrentHashMap.newKeySet()), so we can
+        // safely save even without the lock - we just want to ensure consistency if possible
+        boolean lockAcquired = false;
+        try {
+            lockAcquired = managerLock.tryLock(SHUTDOWN_LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (!lockAcquired) {
+                Bukkit.getLogger().log(Level.WARNING, "[ImageFrame] Could not acquire lock during shutdown (timeout after " + SHUTDOWN_LOCK_TIMEOUT_SECONDS + "s). Saving deleted maps without lock.");
+            }
+            // Save regardless of lock status - the data structures are thread-safe
+            imageFrameStorage.saveDeletedMaps(deletedMapIds);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Bukkit.getLogger().log(Level.WARNING, "[ImageFrame] Interrupted while waiting for lock during shutdown. Saving deleted maps without lock.");
+            imageFrameStorage.saveDeletedMaps(deletedMapIds);
+        } finally {
+            if (lockAcquired) {
+                managerLock.unlock();
+            }
+        }
     }
 
     public void appendRenderEventListener(ImageMapRenderEventListener listener) {
@@ -119,31 +145,36 @@ public class ImageMapManager implements AutoCloseable {
         renderEventListeners.forEach(each -> each.accept(manager, imageMap, map, player, renderData));
     }
 
-    public synchronized void addMap(ImageMap map) throws Exception {
-        if (map.getManager() != this) {
-            throw new IllegalArgumentException("ImageMap's manager is not set to this");
-        }
-        if (getFromCreator(map.getCreator(), map.getName()) != null) {
-            throw new IllegalArgumentException("Duplicated map name for this creator");
-        }
-        int originalImageIndex = map.getImageIndex();
-        imageFrameStorage.prepareImageIndex(map, i -> map.imageIndex = i);
-        maps.put(map.getImageIndex(), map);
-        for (MapView mapView : map.getMapViews()) {
-            mapsByView.put(mapView, map);
-            deletedMapIds.remove(mapView.getId());
-        }
+    public void addMap(ImageMap map) throws Exception {
+        managerLock.lock();
         try {
-            map.save();
-            Bukkit.getPluginManager().callEvent(new ImageMapAddedEvent(map));
-        } catch (Throwable e) {
-            maps.remove(originalImageIndex);
-            for (MapView mapView : map.getMapViews()) {
-                mapsByView.remove(mapView);
+            if (map.getManager() != this) {
+                throw new IllegalArgumentException("ImageMap's manager is not set to this");
             }
-            throw e;
+            if (getFromCreator(map.getCreator(), map.getName()) != null) {
+                throw new IllegalArgumentException("Duplicated map name for this creator");
+            }
+            int originalImageIndex = map.getImageIndex();
+            imageFrameStorage.prepareImageIndex(map, i -> map.imageIndex = i);
+            maps.put(map.getImageIndex(), map);
+            for (MapView mapView : map.getMapViews()) {
+                mapsByView.put(mapView, map);
+                deletedMapIds.remove(mapView.getId());
+            }
+            try {
+                map.save();
+                Bukkit.getPluginManager().callEvent(new ImageMapAddedEvent(map));
+            } catch (Throwable e) {
+                maps.remove(originalImageIndex);
+                for (MapView mapView : map.getMapViews()) {
+                    mapsByView.remove(mapView);
+                }
+                throw e;
+            }
+            saveDeletedMapsInternal();
+        } finally {
+            managerLock.unlock();
         }
-        saveDeletedMaps();
     }
 
     public boolean hasMap(int imageIndex) {
@@ -191,61 +222,71 @@ public class ImageMapManager implements AutoCloseable {
     }
 
     public boolean deleteMap(int imageIndex) {
-        ImageMap imageMap = maps.remove(imageIndex);
-        if (imageMap == null) {
-            return false;
-        }
-        List<MapView> mapViews = imageMap.getMapViews();
-        for (MapView mapView : mapViews) {
-            mapsByView.remove(mapView);
-        }
-        if (imageMap.trackDeletedMaps()) {
-            mapViews.forEach(each -> deletedMapIds.add(each.getId()));
-        }
-        imageMap.markInvalid();
-        imageFrameStorage.deleteMap(imageIndex);
-        imageMap.stop();
-        saveDeletedMaps();
-        Bukkit.getPluginManager().callEvent(new ImageMapDeletedEvent(imageMap));
-        Scheduler.runTask(ImageFrame.plugin, () -> {
-            mapViews.forEach(each -> {
-                if (each.getRenderers().isEmpty()) {
-                    each.addRenderer(DeletedMapRenderer.INSTANCE);
-                }
+        managerLock.lock();
+        try {
+            ImageMap imageMap = maps.remove(imageIndex);
+            if (imageMap == null) {
+                return false;
+            }
+            List<MapView> mapViews = imageMap.getMapViews();
+            for (MapView mapView : mapViews) {
+                mapsByView.remove(mapView);
+            }
+            if (imageMap.trackDeletedMaps()) {
+                mapViews.forEach(each -> deletedMapIds.add(each.getId()));
+            }
+            imageMap.markInvalid();
+            imageFrameStorage.deleteMap(imageIndex);
+            imageMap.stop();
+            saveDeletedMapsInternal();
+            Bukkit.getPluginManager().callEvent(new ImageMapDeletedEvent(imageMap));
+            Scheduler.runTask(ImageFrame.plugin, () -> {
+                mapViews.forEach(each -> {
+                    if (each.getRenderers().isEmpty()) {
+                        each.addRenderer(DeletedMapRenderer.INSTANCE);
+                    }
+                });
             });
-        });
-        return true;
+            return true;
+        } finally {
+            managerLock.unlock();
+        }
     }
 
-    public synchronized void updateMap(int imageIndex, boolean exist) {
-        ImageMap imageMap = maps.get(imageIndex);
+    public void updateMap(int imageIndex, boolean exist) {
+        managerLock.lock();
         try {
-            if (imageMap == null) {
-                if (exist) {
-                    JsonObject json = imageFrameStorage.loadImageMapData(imageIndex);
-                    Scheduler.runTaskAsynchronously(ImageFrame.plugin, () -> {
-                        try {
-                            addMap(ImageMapLoaders.load(this, json).get());
-                        } catch (Exception e) {
-                            throw new RuntimeException("Unable to update map " + imageIndex + " from source", e);
-                        }
-                    });
-                }
-            } else {
-                if (exist) {
-                    JsonObject json = imageFrameStorage.loadImageMapData(imageIndex);
-                    Scheduler.runTaskAsynchronously(ImageFrame.plugin, () -> {
-                        if (imageMap.applyUpdate(json)) {
-                            imageMap.reloadColorCache();
-                            Bukkit.getPluginManager().callEvent(new ImageMapUpdatedEvent(imageMap));
-                        }
-                    });
+            ImageMap imageMap = maps.get(imageIndex);
+            try {
+                if (imageMap == null) {
+                    if (exist) {
+                        JsonObject json = imageFrameStorage.loadImageMapData(imageIndex);
+                        Scheduler.runTaskAsynchronously(ImageFrame.plugin, () -> {
+                            try {
+                                addMap(ImageMapLoaders.load(this, json).get());
+                            } catch (Exception e) {
+                                throw new RuntimeException("Unable to update map " + imageIndex + " from source", e);
+                            }
+                        });
+                    }
                 } else {
-                    deleteMap(imageIndex);
+                    if (exist) {
+                        JsonObject json = imageFrameStorage.loadImageMapData(imageIndex);
+                        Scheduler.runTaskAsynchronously(ImageFrame.plugin, () -> {
+                            if (imageMap.applyUpdate(json)) {
+                                imageMap.reloadColorCache();
+                                Bukkit.getPluginManager().callEvent(new ImageMapUpdatedEvent(imageMap));
+                            }
+                        });
+                    } else {
+                        deleteMap(imageIndex);
+                    }
                 }
+            } catch (Exception e) {
+                throw new RuntimeException("Unable to update map " + imageIndex + " from source", e);
             }
-        } catch (Exception e) {
-            throw new RuntimeException("Unable to update map " + imageIndex + " from source", e);
+        } finally {
+            managerLock.unlock();
         }
     }
 
@@ -261,9 +302,14 @@ public class ImageMapManager implements AutoCloseable {
         return isMapDeleted(mapView.getId());
     }
 
-    public synchronized void loadMaps(IFPlayerManager ifPlayerManager) {
-        maps.clear();
-        mapsByView.clear();
+    public void loadMaps(IFPlayerManager ifPlayerManager) {
+        managerLock.lock();
+        try {
+            maps.clear();
+            mapsByView.clear();
+        } finally {
+            managerLock.unlock();
+        }
         List<MutablePair<String, Future<? extends ImageMap>>> futures = imageFrameStorage.loadMaps(this, deletedMapIds, ifPlayerManager);
         Scheduler.runTaskAsynchronously(ImageFrame.plugin, () -> {
             int count = 0;
@@ -284,9 +330,15 @@ public class ImageMapManager implements AutoCloseable {
         syncMaps(false);
     }
 
-    public synchronized void syncMaps(boolean verbose) {
+    public void syncMaps(boolean verbose) {
         Set<Integer> indexesFromStorage = imageFrameStorage.getAllImageIndexes();
-        Set<Integer> indexesFromLocal = maps.keySet();
+        Set<Integer> indexesFromLocal;
+        managerLock.lock();
+        try {
+            indexesFromLocal = Set.copyOf(maps.keySet());
+        } finally {
+            managerLock.unlock();
+        }
         int added = 0;
         int deleted = 0;
         for (int index : Sets.symmetricDifference(indexesFromStorage, indexesFromLocal)) {
@@ -310,8 +362,18 @@ public class ImageMapManager implements AutoCloseable {
         }
     }
 
-    public synchronized void saveDeletedMaps() {
+    private void saveDeletedMapsInternal() {
+        // Called when lock is already held
         imageFrameStorage.saveDeletedMaps(deletedMapIds);
+    }
+
+    public void saveDeletedMaps() {
+        managerLock.lock();
+        try {
+            saveDeletedMapsInternal();
+        } finally {
+            managerLock.unlock();
+        }
     }
 
     public void sendAllMaps(Collection<? extends Player> players) {
