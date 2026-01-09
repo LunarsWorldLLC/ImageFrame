@@ -100,6 +100,33 @@ import static net.kyori.adventure.text.Component.text;
 
 public class Commands implements CommandExecutor, TabCompleter {
 
+    private static final List<String> SUBCOMMANDS = Arrays.asList(
+        "reload", "resync", "update", "create", "overlay", "clone", "playback", "select",
+        "marker", "refresh", "rename", "info", "list", "delete", "purge", "setaccess",
+        "get", "admindelete", "adminsetcreator", "adminmigrate", "preference",
+        "giveinvisibleframe", "storagemigrate"
+    );
+
+    /**
+     * Check if the given string looks like a URL (for the simplified /if URL SIZE syntax)
+     */
+    private static boolean isLikelyUrl(String str) {
+        if (str == null || str.isEmpty()) {
+            return false;
+        }
+        // If it's a known subcommand, it's not a URL
+        for (String cmd : SUBCOMMANDS) {
+            if (str.equalsIgnoreCase(cmd)) {
+                return false;
+            }
+        }
+        // Check common URL patterns
+        String lower = str.toLowerCase();
+        return lower.startsWith("http://") || lower.startsWith("https://") ||
+               lower.startsWith("www.") || lower.contains("://") ||
+               lower.equalsIgnoreCase("upload");
+    }
+
     @SuppressWarnings({"CallToPrintStackTrace", "deprecation", "NullableProblems"})
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
@@ -115,6 +142,114 @@ public class Commands implements CommandExecutor, TabCompleter {
                     ImageFrame.customClientNetworkManager.sendAcknowledgement(player);
                     sendMessage(sender, ChatColor.RED + "This server supports ImageFrame Client but you are not using it.");
                 }
+            }
+            return true;
+        }
+
+        // Simplified create command: /if <url> <size>
+        // When args.length == 2 and first arg looks like a URL, treat as quick create
+        if (args.length == 2 && isLikelyUrl(args[0])) {
+            if (sender.hasPermission("imageframe.create")) {
+                if (!(sender instanceof Player)) {
+                    sendMessage(sender, translatable(NO_CONSOLE).color(NamedTextColor.RED));
+                    return true;
+                }
+                try {
+                    Player player = (Player) sender;
+                    UUID owner = player.getUniqueId();
+                    String url = args[0];
+                    int size = Integer.parseInt(args[1]);
+                    int width = size;
+                    int height = size;
+                    String name = UUID.randomUUID().toString().substring(0, 8);
+
+                    if (width * height > ImageFrame.mapMaxSize) {
+                        sendMessage(sender, translatable(OVERSIZE, ImageFrame.mapMaxSize).color(NamedTextColor.RED));
+                        return true;
+                    }
+                    int limit = ImageFrame.getPlayerCreationLimit(player);
+                    Set<ImageMap> existingMaps = ImageFrame.imageMapManager.getFromCreator(owner);
+                    if (limit >= 0 && existingMaps.size() >= limit) {
+                        sendMessage(sender, translatable(PLAYER_CREATION_LIMIT_REACHED, limit).color(NamedTextColor.RED));
+                        return true;
+                    }
+                    if (!ImageFrame.isURLAllowed(url)) {
+                        sendMessage(sender, translatable(URL_RESTRICTED).color(NamedTextColor.RED));
+                        return true;
+                    }
+                    int takenMaps;
+                    if (ImageFrame.requireEmptyMaps) {
+                        if ((takenMaps = MapUtils.removeEmptyMaps(player, width * height, true)) < 0) {
+                            sendMessage(sender, translatable(NOT_ENOUGH_MAPS, width * height).color(NamedTextColor.RED));
+                            return true;
+                        }
+                    } else {
+                        takenMaps = 0;
+                    }
+                    Scheduler.runTaskAsynchronously(ImageFrame.plugin, () -> {
+                        ImageMapCreationTask<ImageMap> creationTask = null;
+                        try {
+                            String finalUrl = url;
+                            if (ImageFrame.imageUploadManager.isOperational() && url.equalsIgnoreCase("upload")) {
+                                PendingUpload pendingUpload = ImageFrame.imageUploadManager.newPendingUpload(player.getUniqueId());
+                                String uploadUrl = pendingUpload.getUrl(ImageFrame.uploadServiceDisplayURL, player.getUniqueId());
+                                Scheduler.runTaskLaterAsynchronously(ImageFrame.plugin, () -> sendMessage(sender, translatable(UPLOAD_LINK, Component.text(uploadUrl).color(NamedTextColor.YELLOW).clickEvent(ClickEvent.openUrl(uploadUrl))).color(NamedTextColor.GREEN)), 2);
+                                finalUrl = pendingUpload.getFileBlocking().toURI().toURL().toString();
+                            }
+                            if (HTTPRequestUtils.getContentSize(finalUrl) > ImageFrame.maxImageFileSize) {
+                                sendMessage(sender, translatable(IMAGE_OVER_MAX_FILE_SIZE, ImageFrame.maxImageFileSize).color(NamedTextColor.RED));
+                                throw new IOException("Image over max file size");
+                            }
+                            String imageType = HTTPRequestUtils.getContentType(finalUrl);
+                            if (imageType == null) {
+                                imageType = URLConnection.guessContentTypeFromName(finalUrl);
+                            }
+                            if (imageType == null) {
+                                imageType = "";
+                            } else {
+                                imageType = imageType.trim();
+                            }
+                            sendMessage(sender, translatable(IMAGE_MAP_PROCESSING).color(NamedTextColor.YELLOW));
+                            String processingUrl = finalUrl;
+                            String processingImageType = imageType;
+                            creationTask = ImageFrame.imageMapCreationTaskManager.enqueue(owner, name, () -> {
+                                ImageMapLoader<? extends URLImageMap, URLImageMapCreateInfo> loader = ImageMapLoaders.getLoader(URLImageMap.class, URLImageMapCreateInfo.class, processingImageType, sender);
+                                return loader.create(new URLImageMapCreateInfo(ImageFrame.imageMapManager, name, processingUrl, width, height, DitheringType.NEAREST_COLOR, owner)).get();
+                            });
+                            ImageMap imageMap = creationTask.get();
+                            ImageFrame.imageMapManager.addMap(imageMap);
+                            ImageFrame.combinedMapItemHandler.giveCombinedMap(imageMap, player);
+                            sendMessage(sender, translatable(IMAGE_MAP_CREATED).color(NamedTextColor.GREEN));
+                            creationTask.complete(translatable(IMAGE_MAP_CREATED).color(NamedTextColor.GREEN));
+                        } catch (ImageUploadManager.LinkTimeoutException e) {
+                            sendMessage(sender, translatable(UPLOAD_EXPIRED).color(NamedTextColor.RED));
+                            if (takenMaps > 0) {
+                                PlayerUtils.giveItem(player, new ItemStack(Material.MAP, takenMaps));
+                            }
+                        } catch (ImageMapCreationTaskManager.EnqueueRejectedException e) {
+                            sendMessage(sender, translatable(IMAGE_MAP_ALREADY_QUEUED).color(NamedTextColor.RED));
+                            if (takenMaps > 0) {
+                                PlayerUtils.giveItem(player, new ItemStack(Material.MAP, takenMaps));
+                            }
+                        } catch (Exception e) {
+                            sendMessage(sender, translatable(UNABLE_TO_LOAD_MAP).color(NamedTextColor.RED));
+                            if (creationTask != null) {
+                                creationTask.complete(translatable(UNABLE_TO_LOAD_MAP).color(NamedTextColor.RED));
+                            }
+                            new IOException("Unable to download image. Make sure you are using a direct link to the image. Dispatcher: " + sender.getName() + " URL: " + url, e).printStackTrace();
+                            if (takenMaps > 0) {
+                                PlayerUtils.giveItem(player, new ItemStack(Material.MAP, takenMaps));
+                            }
+                        }
+                    });
+                } catch (NumberFormatException e) {
+                    sendMessage(sender, translatable(INVALID_USAGE).color(NamedTextColor.RED));
+                } catch (Exception e) {
+                    sendMessage(sender, translatable(UNABLE_TO_LOAD_MAP).color(NamedTextColor.RED));
+                    e.printStackTrace();
+                }
+            } else {
+                sendMessage(sender, translatable(NO_PERMISSION).color(NamedTextColor.RED));
             }
             return true;
         }
@@ -1688,8 +1823,23 @@ public class Commands implements CommandExecutor, TabCompleter {
                         tab.add("storagemigrate");
                     }
                 }
+                // Add hint for simplified /if <url> <size> syntax
+                if (sender.hasPermission("imageframe.create") && tab.isEmpty()) {
+                    if ("<url>".startsWith(args[0].toLowerCase()) || "http".startsWith(args[0].toLowerCase())) {
+                        tab.add("<url>");
+                    }
+                }
                 return tab;
             case 2:
+                // Simplified /if <url> <size> syntax - suggest sizes when URL detected
+                if (sender.hasPermission("imageframe.create") && isLikelyUrl(args[0])) {
+                    tab.add("1");
+                    tab.add("2");
+                    tab.add("3");
+                    tab.add("4");
+                    tab.add("5");
+                    return tab;
+                }
                 if (sender.hasPermission("imageframe.create")) {
                     if ("create".equalsIgnoreCase(args[0])) {
                         tab.add("<name>");
