@@ -121,20 +121,32 @@ public class Commands implements CommandExecutor, TabCompleter {
 
         // Simplified quick create: /if <url> <size>
         // When the first argument looks like a URL, treat this as a quick create command
-        if (args.length == 2 && (args[0].toLowerCase().startsWith("http://") || args[0].toLowerCase().startsWith("https://"))) {
-            if (sender.hasPermission("imageframe.create")) {
-                if (!(sender instanceof Player)) {
-                    sendMessage(sender, translatable(NO_CONSOLE).color(NamedTextColor.RED));
-                    return true;
-                }
-                try {
-                    Player player = (Player) sender;
-                    int size = Integer.parseInt(args[1]);
-                    if (size <= 0) {
-                        sendMessage(sender, translatable(INVALID_USAGE).color(NamedTextColor.RED));
+        // URLs may contain & characters which Minecraft splits into multiple args, so we check
+        // if the first arg is a URL and the last arg is a number
+        if (args.length >= 2 && (args[0].toLowerCase().startsWith("http://") || args[0].toLowerCase().startsWith("https://"))) {
+            String lastArg = args[args.length - 1];
+            int size;
+            try {
+                size = Integer.parseInt(lastArg);
+            } catch (NumberFormatException e) {
+                // Last arg is not a number, so this isn't the quick create format
+                // Fall through to normal command handling
+                size = -1;
+            }
+            if (size > 0) {
+                if (sender.hasPermission("imageframe.create")) {
+                    if (!(sender instanceof Player)) {
+                        sendMessage(sender, translatable(NO_CONSOLE).color(NamedTextColor.RED));
                         return true;
                     }
-                    String url = args[0];
+                    Player player = (Player) sender;
+                    // Reconstruct URL from all args except the last one (size)
+                    StringBuilder urlBuilder = new StringBuilder();
+                    for (int i = 0; i < args.length - 1; i++) {
+                        if (i > 0) urlBuilder.append("&");
+                        urlBuilder.append(args[i]);
+                    }
+                    String url = urlBuilder.toString();
                     String name = UUID.randomUUID().toString().substring(0, 8);
                     int width = size;
                     int height = size;
@@ -206,13 +218,11 @@ public class Commands implements CommandExecutor, TabCompleter {
                             }
                         }
                     });
-                } catch (NumberFormatException e) {
-                    sendMessage(sender, translatable(INVALID_USAGE).color(NamedTextColor.RED));
+                } else {
+                    sendMessage(sender, translatable(NO_PERMISSION).color(NamedTextColor.RED));
                 }
-            } else {
-                sendMessage(sender, translatable(NO_PERMISSION).color(NamedTextColor.RED));
+                return true;
             }
-            return true;
         }
 
         if (args[0].equalsIgnoreCase("reload")) {
