@@ -12,7 +12,7 @@ softdepend:
 
 commands:
   imageframe:
-    aliases: [iframe, if, frame]
+    aliases: [iframe, if, frame, img]
     description: Plugin main command
 
 permissions:

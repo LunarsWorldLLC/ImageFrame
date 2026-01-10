@@ -119,10 +119,8 @@ public class Commands implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        // Simplified quick create: /if <url> <size>
+        // Simplified quick create: /img <url> <size>
         // When the first argument looks like a URL, treat this as a quick create command
-        // URLs may contain & characters which Minecraft splits into multiple args, so we check
-        // if the first arg is a URL and the last arg is a number
         if (args.length >= 2 && (args[0].toLowerCase().startsWith("http://") || args[0].toLowerCase().startsWith("https://"))) {
             String lastArg = args[args.length - 1];
             int size;
@@ -143,7 +141,6 @@ public class Commands implements CommandExecutor, TabCompleter {
                     // Reconstruct URL from all args except the last one (size)
                     StringBuilder urlBuilder = new StringBuilder();
                     for (int i = 0; i < args.length - 1; i++) {
-                        if (i > 0) urlBuilder.append("&");
                         urlBuilder.append(args[i]);
                     }
                     String url = urlBuilder.toString();
