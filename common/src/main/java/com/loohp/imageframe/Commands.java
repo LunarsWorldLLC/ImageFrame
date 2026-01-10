@@ -119,6 +119,109 @@ public class Commands implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        // Simplified quick create: /img <url> <size>
+        // When the first argument looks like a URL, treat this as a quick create command
+        if (args.length >= 2 && (args[0].toLowerCase().startsWith("http://") || args[0].toLowerCase().startsWith("https://"))) {
+            String lastArg = args[args.length - 1];
+            int size;
+            try {
+                size = Integer.parseInt(lastArg);
+            } catch (NumberFormatException e) {
+                // Last arg is not a number, so this isn't the quick create format
+                // Fall through to normal command handling
+                size = -1;
+            }
+            if (size > 0) {
+                if (sender.hasPermission("imageframe.create")) {
+                    if (!(sender instanceof Player)) {
+                        sendMessage(sender, translatable(NO_CONSOLE).color(NamedTextColor.RED));
+                        return true;
+                    }
+                    Player player = (Player) sender;
+                    // Reconstruct URL from all args except the last one (size)
+                    StringBuilder urlBuilder = new StringBuilder();
+                    for (int i = 0; i < args.length - 1; i++) {
+                        urlBuilder.append(args[i]);
+                    }
+                    String url = urlBuilder.toString();
+                    String name = UUID.randomUUID().toString().substring(0, 8);
+                    int width = size;
+                    int height = size;
+
+                    if (width * height > ImageFrame.mapMaxSize) {
+                        sendMessage(sender, translatable(OVERSIZE, ImageFrame.mapMaxSize).color(NamedTextColor.RED));
+                        return true;
+                    }
+                    UUID owner = player.getUniqueId();
+                    int limit = ImageFrame.getPlayerCreationLimit(player);
+                    Set<ImageMap> existingMaps = ImageFrame.imageMapManager.getFromCreator(owner);
+                    if (limit >= 0 && existingMaps.size() >= limit) {
+                        sendMessage(sender, translatable(PLAYER_CREATION_LIMIT_REACHED, limit).color(NamedTextColor.RED));
+                        return true;
+                    }
+                    if (!ImageFrame.isURLAllowed(url)) {
+                        sendMessage(sender, translatable(URL_RESTRICTED).color(NamedTextColor.RED));
+                        return true;
+                    }
+                    int takenMaps;
+                    if (ImageFrame.requireEmptyMaps) {
+                        if ((takenMaps = MapUtils.removeEmptyMaps(player, width * height, true)) < 0) {
+                            sendMessage(sender, translatable(NOT_ENOUGH_MAPS, width * height).color(NamedTextColor.RED));
+                            return true;
+                        }
+                    } else {
+                        takenMaps = 0;
+                    }
+                    Scheduler.runTaskAsynchronously(ImageFrame.plugin, () -> {
+                        ImageMapCreationTask<ImageMap> creationTask = null;
+                        try {
+                            if (HTTPRequestUtils.getContentSize(url) > ImageFrame.maxImageFileSize) {
+                                sendMessage(sender, translatable(IMAGE_OVER_MAX_FILE_SIZE, ImageFrame.maxImageFileSize).color(NamedTextColor.RED));
+                                throw new IOException("Image over max file size");
+                            }
+                            String imageType = HTTPRequestUtils.getContentType(url);
+                            if (imageType == null) {
+                                imageType = URLConnection.guessContentTypeFromName(url);
+                            }
+                            if (imageType == null) {
+                                imageType = "";
+                            } else {
+                                imageType = imageType.trim();
+                            }
+                            sendMessage(sender, translatable(IMAGE_MAP_PROCESSING).color(NamedTextColor.YELLOW));
+                            String finalImageType = imageType;
+                            creationTask = ImageFrame.imageMapCreationTaskManager.enqueue(owner, name, () -> {
+                                ImageMapLoader<? extends URLImageMap, URLImageMapCreateInfo> loader = ImageMapLoaders.getLoader(URLImageMap.class, URLImageMapCreateInfo.class, finalImageType, sender);
+                                return loader.create(new URLImageMapCreateInfo(ImageFrame.imageMapManager, name, url, width, height, DitheringType.fromName(null), owner)).get();
+                            });
+                            ImageMap imageMap = creationTask.get();
+                            ImageFrame.imageMapManager.addMap(imageMap);
+                            ImageFrame.combinedMapItemHandler.giveCombinedMap(imageMap, player);
+                            sendMessage(sender, translatable(IMAGE_MAP_CREATED).color(NamedTextColor.GREEN));
+                            creationTask.complete(translatable(IMAGE_MAP_CREATED).color(NamedTextColor.GREEN));
+                        } catch (ImageMapCreationTaskManager.EnqueueRejectedException e) {
+                            sendMessage(sender, translatable(IMAGE_MAP_ALREADY_QUEUED).color(NamedTextColor.RED));
+                            if (takenMaps > 0) {
+                                PlayerUtils.giveItem(player, new ItemStack(Material.MAP, takenMaps));
+                            }
+                        } catch (Exception e) {
+                            sendMessage(sender, translatable(UNABLE_TO_LOAD_MAP).color(NamedTextColor.RED));
+                            if (creationTask != null) {
+                                creationTask.complete(translatable(UNABLE_TO_LOAD_MAP).color(NamedTextColor.RED));
+                            }
+                            new IOException("Unable to download image. Make sure you are using a direct link to the image. Dispatcher: " + sender.getName() + " URL: " + url, e).printStackTrace();
+                            if (takenMaps > 0) {
+                                PlayerUtils.giveItem(player, new ItemStack(Material.MAP, takenMaps));
+                            }
+                        }
+                    });
+                } else {
+                    sendMessage(sender, translatable(NO_PERMISSION).color(NamedTextColor.RED));
+                }
+                return true;
+            }
+        }
+
         if (args[0].equalsIgnoreCase("reload")) {
             if (sender.hasPermission("imageframe.reload")) {
                 ImageFrame.plugin.reloadConfig();
@@ -1690,7 +1793,15 @@ public class Commands implements CommandExecutor, TabCompleter {
                 }
                 return tab;
             case 2:
+                // Quick create tab completion: suggest sizes when URL is entered
                 if (sender.hasPermission("imageframe.create")) {
+                    if (args[0].toLowerCase().startsWith("http://") || args[0].toLowerCase().startsWith("https://")) {
+                        for (int i = 1; i <= 5; i++) {
+                            if (String.valueOf(i).startsWith(args[1])) {
+                                tab.add(String.valueOf(i));
+                            }
+                        }
+                    }
                     if ("create".equalsIgnoreCase(args[0])) {
                         tab.add("<name>");
                     }
