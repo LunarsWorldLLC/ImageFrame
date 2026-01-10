@@ -183,7 +183,7 @@ public class Commands implements CommandExecutor, TabCompleter {
                             String finalImageType = imageType;
                             creationTask = ImageFrame.imageMapCreationTaskManager.enqueue(owner, name, () -> {
                                 ImageMapLoader<? extends URLImageMap, URLImageMapCreateInfo> loader = ImageMapLoaders.getLoader(URLImageMap.class, URLImageMapCreateInfo.class, finalImageType, sender);
-                                return loader.create(new URLImageMapCreateInfo(ImageFrame.imageMapManager, name, url, width, height, DitheringType.NONE, owner)).get();
+                                return loader.create(new URLImageMapCreateInfo(ImageFrame.imageMapManager, name, url, width, height, DitheringType.fromName(null), owner)).get();
                             });
                             ImageMap imageMap = creationTask.get();
                             ImageFrame.imageMapManager.addMap(imageMap);
