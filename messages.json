@@ -88,26 +88,5 @@
   "imageframe.settings.combined_map_item.lore.2": "",
   "imageframe.settings.combined_map_item.lore.3": "ImageID: %s",
   "imageframe.settings.combined_map_item.lore.4": "Creator: %s (%s)",
-  "imageframe.settings.combined_map_item.lore.5": "Time Created: %s",
-
-  "imageframeclient.midnightconfig.title": "ImageFrame Client Settings",
-  "imageframeclient.midnightconfig.useNativeResMapImages": "Use Native Resolution and Full Color Map Images",
-  "imageframeclient.midnightconfig.useNativeResMapImages.tooltip": "Use native resolution and full color map images sent from the server.",
-  "imageframeclient.midnightconfig.maxImageSize": "Maximum Resolution for Images",
-  "imageframeclient.midnightconfig.maxImageSize.tooltip": "The maximum pixels a map can have on each side.",
-  "imageframeclient.midnightconfig.previewMapsInTooltip": "Preview Maps in Tooltip",
-  "imageframeclient.midnightconfig.previewMapsInTooltip.tooltip": "Preview maps when you hover over them in your inventory.",
-  "imageframeclient.midnightconfig.previewPaintingsInTooltip": "Preview Paintings in Tooltip",
-  "imageframeclient.midnightconfig.previewPaintingsInTooltip.tooltip": "Preview paintings when you hover over them in your inventory.",
-  "imageframeclient.midnightconfig.notifyWhenServerSupports": "Notify when Server Supports ImageFrame Client",
-  "imageframeclient.midnightconfig.notifyWhenServerSupports.tooltip": "Show a toast message when you join a server if they support ImageFrame client.",
-  "imageframeclient.midnightconfig.enum.Resolution.NATIVE": "Native",
-  "imageframeclient.midnightconfig.enum.Resolution.MAX_4096": "4096x",
-  "imageframeclient.midnightconfig.enum.Resolution.MAX_2048": "2048x",
-  "imageframeclient.midnightconfig.enum.Resolution.MAX_1024": "1024x",
-  "imageframeclient.midnightconfig.enum.Resolution.MAX_512": "512x",
-  "imageframeclient.midnightconfig.enum.Resolution.MAX_256": "256x",
-  "imageframeclient.midnightconfig.enum.Resolution.MAX_128": "128x",
-  "imageframeclient.message.server_supported.title": "ImageFrame Client Supported Server",
-  "imageframeclient.message.server_supported.description": "This server has ImageFrame and will show images in native resolution and full color!"
+  "imageframe.settings.combined_map_item.lore.5": "Time Created: %s"
 }
