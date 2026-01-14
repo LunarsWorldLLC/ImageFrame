@@ -130,13 +130,6 @@ public class Charts {
             }
         }));
 
-        metrics.addCustomChart(new Metrics.SingleLineChart("players_with_imageframe_client", new Callable<Integer>() {
-            @Override
-            public Integer call() {
-                return ImageFrame.customClientNetworkManager.getPlayers().size();
-            }
-        }));
-
         metrics.addCustomChart(new Metrics.SimplePie("imageframe_language_by_server", new Callable<String>() {
             @Override
             public String call() {

@@ -107,15 +107,6 @@ public class Commands implements CommandExecutor, TabCompleter {
             sendMessage(sender, ChatColor.DARK_AQUA + "ImageFrame written by LOOHP!");
             sendMessage(sender, ChatColor.GOLD + "You are running ImageFrame version: " + ImageFrame.plugin.getDescription().getVersion());
             sendMessage(sender, ChatColor.YELLOW + "Translations are crowdsourced from the community! Visit https://crowdin.com/project/imageframe");
-            if (ImageFrame.imageFrameClientEnabled && sender instanceof Player) {
-                Player player = (Player) sender;
-                if (ImageFrame.customClientNetworkManager.hasPlayer(player)) {
-                    sendMessage(sender, ChatColor.GREEN + "Your ImageFrame Client is supported on the server!");
-                } else {
-                    ImageFrame.customClientNetworkManager.sendAcknowledgement(player);
-                    sendMessage(sender, ChatColor.RED + "This server supports ImageFrame Client but you are not using it.");
-                }
-            }
             return true;
         }
 
