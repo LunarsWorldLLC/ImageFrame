@@ -53,7 +53,7 @@ jobs:
             curl -o BuildTools.jar https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
           fi
 
-          for VERSION in 1.21.8 1.21.9 1.21.10 1.21.11; do
+          for VERSION in 1.21.8 1.21.11; do
             if [ ! -f ~/.m2/repository/org/bukkit/craftbukkit/$VERSION-R0.1-SNAPSHOT/craftbukkit-$VERSION-R0.1-SNAPSHOT.jar ]; then
               echo "Building Spigot $VERSION..."
               java -jar BuildTools.jar --rev $VERSION --remapped

@@ -361,18 +361,6 @@
         </dependency>
         <dependency>
             <groupId>com.loohp</groupId>
-            <artifactId>ImageFrame-V1_21_9</artifactId>
-            <version>${project.version}</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.loohp</groupId>
-            <artifactId>ImageFrame-V1_21_10</artifactId>
-            <version>${project.version}</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.loohp</groupId>
             <artifactId>ImageFrame-V1_21_11</artifactId>
             <version>${project.version}</version>
             <scope>compile</scope>
