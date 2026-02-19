@@ -53,14 +53,21 @@ jobs:
             curl -o BuildTools.jar https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
           fi
 
-          for VERSION in 1.21.8 1.21.11; do
-            if [ ! -f ~/.m2/repository/org/bukkit/craftbukkit/$VERSION-R0.1-SNAPSHOT/craftbukkit-$VERSION-R0.1-SNAPSHOT.jar ]; then
-              echo "Building Spigot $VERSION..."
-              java -jar BuildTools.jar --rev $VERSION --remapped
-            else
-              echo "Spigot $VERSION already in cache, skipping..."
-            fi
-          done
+          # 1.21.8 (R0.1)
+          if [ ! -f ~/.m2/repository/org/spigotmc/spigot/1.21.8-R0.1-SNAPSHOT/spigot-1.21.8-R0.1-SNAPSHOT.jar ]; then
+            echo "Building Spigot 1.21.8..."
+            java -jar BuildTools.jar --rev 1.21.8 --remapped
+          else
+            echo "Spigot 1.21.8 already in cache, skipping..."
+          fi
+
+          # 1.21.11 (R0.2)
+          if [ ! -f ~/.m2/repository/org/spigotmc/spigot/1.21.11-R0.2-SNAPSHOT/spigot-1.21.11-R0.2-SNAPSHOT.jar ]; then
+            echo "Building Spigot 1.21.11..."
+            java -jar BuildTools.jar --rev 1.21.11 --remapped
+          else
+            echo "Spigot 1.21.11 already in cache, skipping..."
+          fi
 
       - name: Build with Maven
         run: mvn clean install -B -DskipTests
